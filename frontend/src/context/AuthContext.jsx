@@ -1,14 +1,11 @@
 import { createContext, useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import API from "../utils/axios";
 
 // 1. Create the context
 export const AuthContext = createContext();
 
 // 2. Create the provider
 export const AuthProvider = ({ children }) => {
-  const navigate = useNavigate();
-
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -26,10 +23,28 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
-  // Login handler
+  // Login handler (returns user + token)
   const login = async (email, password) => {
+    const res = await API.post("/auth/login", {
+      email,
+      password,
+    });
+
+    const { token, user } = res.data;
+
+    localStorage.setItem("token", token);
+    localStorage.setItem("user", JSON.stringify(user));
+
+    setToken(token);
+    setUser(user);
+
+    return { token, user };
+  };
+
+  const register = async (name, email, password) => {
     try {
-      const res = await axios.post("http://localhost:5000/api/auth/login", {
+      const res = await API.post("/auth/register", {
+        name,
         email,
         password,
       });
@@ -42,37 +57,20 @@ export const AuthProvider = ({ children }) => {
       setToken(token);
       setUser(user);
 
-      navigate("/dashboard");
-    } catch (err) {
-      throw new Error(err.response?.data?.message || "Login failed");
+      return { token, user };
+    } catch (error) {
+      console.error("Registration error:", error);
+      console.error("Error response:", error.response?.data);
+      throw error;
     }
   };
 
-  // Register handler
-  const register = async (name, email, password) => {
-    try {
-      const res = await axios.post("http://localhost:5000/api/auth/register", {
-        name,
-        email,
-        password,
-      });
-
-      if (res.status === 201) {
-        navigate("/login");
-      }
-    } catch (err) {
-      throw new Error(err.response?.data?.message || "Registration failed");
-    }
-  };
-
-  // Logout handler
   const logout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
 
     setToken(null);
     setUser(null);
-    navigate("/login");
   };
 
   return (

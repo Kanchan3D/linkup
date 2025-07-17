@@ -1,29 +1,61 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 
-const SOCKET_SERVER_URL = "http://localhost:5000"; // Replace with your backend URL
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "http://localhost:8001";
 
-const useSocket = (roomId, user) => {
+const useSocket = () => {
   const socketRef = useRef(null);
+  const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    if (!roomId || !user) return;
-
-    // 1. Connect
-    socketRef.current = io(SOCKET_SERVER_URL, {
-      query: { roomId, userName: user.name },
+    // Create socket connection with better configuration
+    socketRef.current = io(SOCKET_URL, {
+      transports: ['polling', 'websocket'], // Try polling first, then websocket
+      timeout: 20000,
+      forceNew: true,
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionAttempts: 5,
+      maxReconnectionAttempts: 5
     });
 
-    // 2. Emit a join event
-    socketRef.current.emit("join-room", { roomId, user });
+    // Connection event listeners
+    socketRef.current.on("connect", () => {
+      console.log("Socket connected:", socketRef.current.id);
+      setIsConnected(true);
+    });
 
-    // 3. Cleanup on unmount
+    socketRef.current.on("disconnect", (reason) => {
+      console.log("Socket disconnected:", reason);
+      setIsConnected(false);
+    });
+
+    socketRef.current.on("connect_error", (error) => {
+      console.error("Socket connection error:", error);
+      setIsConnected(false);
+    });
+
+    socketRef.current.on("reconnect", (attempt) => {
+      console.log("Socket reconnected after", attempt, "attempts");
+      setIsConnected(true);
+    });
+
+    socketRef.current.on("reconnect_error", (error) => {
+      console.error("Socket reconnection error:", error);
+    });
+
+    // Cleanup on unmount
     return () => {
-      socketRef.current.disconnect();
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+      }
     };
-  }, [roomId, user]);
+  }, []);
 
-  return socketRef;
+  return {
+    socket: socketRef.current,
+    isConnected,
+  };
 };
 
 export default useSocket;
