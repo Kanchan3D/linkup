@@ -9,8 +9,13 @@ const connectDB = require("../config/db");
 // Load environment variables
 dotenv.config();
 
-// Connect to database
-connectDB();
+// Connect to database with error handling
+let dbConnected = false;
+connectDB().then(() => {
+  dbConnected = true;
+}).catch(err => {
+  console.error("Failed to connect to MongoDB:", err.message);
+});
 
 // CORS origins configuration
 const allowedOrigins = process.env.NODE_ENV === 'production' 
