@@ -67,9 +67,18 @@ app.use("/api/rooms", roomRoutes);
 setupSocket(io);
 
 const PORT = process.env.PORT || 8001;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Local: http://localhost:${PORT}`);
-  console.log(`Network: http://${localIP}:${PORT}`);
-  console.log(`Detected IP: ${localIP}`);
-});
+
+if (process.env.NODE_ENV !== 'production') {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Local: http://localhost:${PORT}`);
+    console.log(`Network: http://${localIP}:${PORT}`);
+    console.log(`Detected IP: ${localIP}`);
+  });
+} else {
+  server.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+module.exports = app;
