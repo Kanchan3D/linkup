@@ -66,17 +66,10 @@ app.use("/api/rooms", roomRoutes);
 // Socket setup
 setupSocket(io);
 
-// For Vercel deployment, we need to export the app
-// In production (Vercel), the server is handled by the platform
-if (process.env.NODE_ENV !== 'production') {
-  const PORT = process.env.PORT || 8001;
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Local: http://localhost:${PORT}`);
-    console.log(`Network: http://${localIP}:${PORT}`);
-    console.log(`Detected IP: ${localIP}`);
-  });
-}
-
-// Export the app for Vercel
-module.exports = app;
+const PORT = process.env.PORT || 8001;
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Local: http://localhost:${PORT}`);
+  console.log(`Network: http://${localIP}:${PORT}`);
+  console.log(`Detected IP: ${localIP}`);
+});
