@@ -29,32 +29,33 @@ const localIP = getLocalIP();
 dotenv.config();
 connectDB();
 
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: [
+// CORS origins configuration
+const allowedOrigins = process.env.NODE_ENV === 'production' 
+  ? [
+      process.env.FRONTEND_URL,
+      process.env.FRONTEND_URL_2, // Add backup frontend URL if needed
+    ].filter(Boolean) // Remove undefined values
+  : [
       "http://localhost:5173", 
       `http://${localIP}:5173`,
       "http://localhost:3000",
       `http://${localIP}:3000`,
       /^http:\/\/192\.168\.\d+\.\d+:5173$/,
       /^http:\/\/192\.168\.\d+\.\d+:3000$/
-    ],
+    ];
+
+const app = express();
+const server = http.createServer(app);
+const io = socketIo(server, {
+  cors: {
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true
   }
 });
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173", 
-    `http://${localIP}:5173`,
-    "http://localhost:3000",
-    `http://${localIP}:3000`,
-    /^http:\/\/192\.168\.\d+\.\d+:5173$/,
-    /^http:\/\/192\.168\.\d+\.\d+:3000$/
-  ],
+  origin: allowedOrigins,
   credentials: true
 }));
 app.use(express.json({ limit: '10mb' })); // Increased limit for file uploads
@@ -65,10 +66,17 @@ app.use("/api/rooms", roomRoutes);
 // Socket setup
 setupSocket(io);
 
-const PORT = process.env.PORT || 8001;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Local: http://localhost:${PORT}`);
-  console.log(`Network: http://${localIP}:${PORT}`);
-  console.log(`Detected IP: ${localIP}`);
-});
+// For Vercel deployment, we need to export the app
+// In production (Vercel), the server is handled by the platform
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 8001;
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
+    console.log(`Local: http://localhost:${PORT}`);
+    console.log(`Network: http://${localIP}:${PORT}`);
+    console.log(`Detected IP: ${localIP}`);
+  });
+}
+
+// Export the app for Vercel
+module.exports = app;
