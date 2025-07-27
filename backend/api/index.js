@@ -9,13 +9,25 @@ const connectDB = require("../config/db");
 // Load environment variables
 dotenv.config();
 
-// Connect to database with error handling
+// Initialize database connection
 let dbConnected = false;
-connectDB().then(() => {
-  dbConnected = true;
-}).catch(err => {
-  console.error("Failed to connect to MongoDB:", err.message);
-});
+
+// Function to ensure database connection
+const ensureDBConnection = async () => {
+  if (!dbConnected) {
+    try {
+      await connectDB();
+      dbConnected = true;
+      console.log("Database connected successfully");
+    } catch (error) {
+      console.error("Database connection failed:", error.message);
+      throw error;
+    }
+  }
+};
+
+// Initialize DB connection
+ensureDBConnection().catch(console.error);
 
 // CORS origins configuration
 const allowedOrigins = process.env.NODE_ENV === 'production' 
@@ -40,6 +52,19 @@ app.use(cors({
 
 app.use(express.json({ limit: '10mb' }));
 
+// Middleware to ensure database connection
+app.use('/api', async (req, res, next) => {
+  try {
+    await ensureDBConnection();
+    next();
+  } catch (error) {
+    res.status(500).json({
+      error: 'Database connection failed',
+      message: error.message
+    });
+  }
+});
+
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/rooms", roomRoutes);
@@ -49,16 +74,38 @@ app.get("/", (req, res) => {
   res.json({ 
     message: "Linkup API is running!",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    dbConnected: dbConnected
+  });
+});
+
+// Add a test endpoint for debugging
+app.get("/api/test", (req, res) => {
+  res.json({
+    message: "API test endpoint working",
+    env: {
+      NODE_ENV: process.env.NODE_ENV,
+      hasJWTSecret: !!process.env.JWT_SECRET,
+      hasMongoURI: !!(process.env.MONGO_URI || process.env.MONGODB_URI),
+      frontendURL: process.env.FRONTEND_URL
+    }
   });
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('Error details:', {
+    message: err.message,
+    stack: err.stack,
+    url: req.url,
+    method: req.method,
+    body: req.body
+  });
+  
   res.status(500).json({ 
     error: 'Something went wrong!',
-    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error',
+    timestamp: new Date().toISOString()
   });
 });
 
