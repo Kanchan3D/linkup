@@ -49,7 +49,13 @@ exports.register = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Registration error:", err);
+    console.error("Registration error details:", {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+      code: err.code
+    });
+    
     if (err.name === 'ValidationError') {
       const errors = Object.values(err.errors).map(e => e.message);
       return res.status(400).json({ message: errors.join(', ') });
@@ -57,7 +63,17 @@ exports.register = async (req, res) => {
     if (err.code === 11000) {
       return res.status(400).json({ message: "User with this email already exists" });
     }
-    return res.status(500).json({ message: "Server error during registration" });
+    
+    // Check for JWT secret error
+    if (err.message && err.message.includes('secretOrPrivateKey')) {
+      console.error("JWT_SECRET is missing or invalid");
+      return res.status(500).json({ message: "Server configuration error" });
+    }
+    
+    return res.status(500).json({ 
+      message: "Server error during registration",
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 };
 

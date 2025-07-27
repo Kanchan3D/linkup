@@ -83,12 +83,24 @@ app.get("/", (req, res) => {
 app.get("/api/test", (req, res) => {
   res.json({
     message: "API test endpoint working",
+    timestamp: new Date().toISOString(),
     env: {
       NODE_ENV: process.env.NODE_ENV,
       hasJWTSecret: !!process.env.JWT_SECRET,
       hasMongoURI: !!(process.env.MONGO_URI || process.env.MONGODB_URI),
-      frontendURL: process.env.FRONTEND_URL
-    }
+      frontendURL: process.env.FRONTEND_URL,
+      mongoUriLength: (process.env.MONGO_URI || process.env.MONGODB_URI || '').length,
+      jwtSecretLength: (process.env.JWT_SECRET || '').length
+    },
+    dbConnected: dbConnected
+  });
+});
+
+// Add debug endpoint for auth
+app.get("/api/auth/test", (req, res) => {
+  res.json({
+    message: "Auth endpoint accessible",
+    timestamp: new Date().toISOString()
   });
 });
 
