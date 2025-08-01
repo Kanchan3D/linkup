@@ -1,0 +1,19 @@
+{
+  "name": "linkup-socket-server",
+  "version": "1.0.0",
+  "description": "Socket.IO server for LinkUp real-time features",
+  "main": "socket-server.js",
+  "scripts": {
+    "start": "node socket-server.js",
+    "dev": "nodemon socket-server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.8.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
