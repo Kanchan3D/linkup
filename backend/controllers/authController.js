@@ -115,7 +115,35 @@ exports.login = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Login error:", err);
-    return res.status(500).json({ message: "Server error during login" });
+    console.error("Login error details:", {
+      message: err.message,
+      stack: err.stack,
+      name: err.name,
+      email: req.body?.email,
+      hasJWTSecret: !!process.env.JWT_SECRET,
+      hasMongoURI: !!(process.env.MONGODB_URI || process.env.MONGO_URI)
+    });
+    
+    // Check for specific errors
+    if (err.message && err.message.includes('secretOrPrivateKey')) {
+      console.error("JWT_SECRET is missing or invalid during login");
+      return res.status(500).json({ 
+        message: "Server configuration error",
+        details: "JWT secret missing"
+      });
+    }
+    
+    if (err.name === 'MongooseError' || err.name === 'MongoError' || err.name === 'MongoServerError') {
+      console.error("Database error during login:", err.message);
+      return res.status(500).json({ 
+        message: "Database connection error",
+        details: err.message
+      });
+    }
+    
+    return res.status(500).json({ 
+      message: "Server error during login",
+      details: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+    });
   }
 };

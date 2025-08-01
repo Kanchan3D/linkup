@@ -90,7 +90,8 @@ app.get("/api/test", (req, res) => {
       hasMongoURI: !!(process.env.MONGO_URI || process.env.MONGODB_URI),
       frontendURL: process.env.FRONTEND_URL,
       mongoUriLength: (process.env.MONGO_URI || process.env.MONGODB_URI || '').length,
-      jwtSecretLength: (process.env.JWT_SECRET || '').length
+      jwtSecretLength: (process.env.JWT_SECRET || '').length,
+      port: process.env.PORT || 'not set'
     },
     dbConnected: dbConnected
   });
@@ -100,8 +101,47 @@ app.get("/api/test", (req, res) => {
 app.get("/api/auth/test", (req, res) => {
   res.json({
     message: "Auth endpoint accessible",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    dbConnected: dbConnected
   });
+});
+
+// Add a specific login debug endpoint
+app.post("/api/auth/debug-login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    // Check environment
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ error: "JWT_SECRET not found" });
+    }
+    
+    if (!process.env.MONGODB_URI && !process.env.MONGO_URI) {
+      return res.status(500).json({ error: "MongoDB URI not found" });
+    }
+    
+    // Check database connection
+    await ensureDBConnection();
+    
+    // Test JWT
+    const jwt = require('jsonwebtoken');
+    const testToken = jwt.sign({ test: 'data' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+    
+    res.json({
+      message: "Debug login test passed",
+      hasEmail: !!email,
+      hasPassword: !!password,
+      jwtTest: "passed",
+      dbConnected: dbConnected
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      error: "Debug login failed",
+      message: error.message,
+      stack: error.stack
+    });
+  }
 });
 
 // Error handling middleware
