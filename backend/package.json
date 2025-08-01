@@ -1,15 +1,19 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
+  "description": "Linkup Backend API",
+  "main": "api/index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "vercel": "node api/index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "devDependencies": {
     "nodemon": "^3.1.10"
   },
