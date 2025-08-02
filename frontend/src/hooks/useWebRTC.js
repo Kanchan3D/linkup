@@ -1,10 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 
 const useWebRTC = (socket, roomId, localStream) => {
   const [remoteStreams, setRemoteStreams] = useState(new Map());
   const peersRef = useRef(new Map());
+  
+  // Debug hook initialization
+  const hookId = useRef(Math.random().toString(36).substr(2, 9));
+  console.log(`useWebRTC hook initialized with ID: ${hookId.current}`);
 
-  const createPeerConnection = (socketId, isInitiator = false) => {
+  const createPeerConnection = useCallback((socketId, isInitiator = false) => {
+    console.log(`Creating peer connection for ${socketId}, isInitiator: ${isInitiator}`);
+    
+    // Check if peer connection already exists
+    if (peersRef.current.has(socketId)) {
+      console.log(`Peer connection already exists for ${socketId}, skipping creation`);
+      return peersRef.current.get(socketId);
+    }
+    
     const peerConnection = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -14,25 +26,64 @@ const useWebRTC = (socket, roomId, localStream) => {
 
     // Add local stream to peer connection
     if (localStream) {
+      console.log(`Adding local stream tracks for ${socketId}:`, localStream.getTracks().length, 'tracks');
       localStream.getTracks().forEach(track => {
+        console.log(`Adding track: ${track.kind} (${track.label})`);
         peerConnection.addTrack(track, localStream);
       });
+    } else {
+      console.warn(`No local stream available for ${socketId}`);
     }
 
     // Handle remote stream
     peerConnection.ontrack = (event) => {
+      console.log(`Received remote stream from ${socketId}:`, event.streams.length, 'streams');
       const [remoteStream] = event.streams;
+      console.log(`Remote stream tracks:`, remoteStream.getTracks().map(t => `${t.kind} (${t.label})`));
       setRemoteStreams(prev => new Map(prev.set(socketId, remoteStream)));
     };
 
     // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
+      if (event.candidate && socket) {
+        console.log(`Sending ICE candidate to ${socketId}:`, event.candidate);
         socket.emit('ice-candidate', {
           candidate: event.candidate,
           to: socketId,
           from: socket.id
         });
+      } else if (!event.candidate) {
+        console.log(`ICE gathering complete for ${socketId}`);
+      }
+    };
+
+    // Handle connection state changes
+    peerConnection.onconnectionstatechange = () => {
+      console.log(`Peer connection state (${socketId}):`, peerConnection.connectionState);
+      if (peerConnection.connectionState === 'failed') {
+        console.error('Peer connection failed for:', socketId);
+        removePeer(socketId);
+      }
+    };
+
+    // Monitor ICE connection state
+    peerConnection.oniceconnectionstatechange = () => {
+      console.log(`ICE connection state (${socketId}):`, peerConnection.iceConnectionState);
+      
+      if (peerConnection.iceConnectionState === 'failed' || 
+          peerConnection.iceConnectionState === 'disconnected') {
+        console.warn(`ICE connection issues for ${socketId}:`, peerConnection.iceConnectionState);
+        
+        // Try to restart ICE
+        if (peerConnection.iceConnectionState === 'failed') {
+          console.log(`Attempting ICE restart for ${socketId}`);
+          peerConnection.restartIce();
+        }
+      }
+      
+      if (peerConnection.iceConnectionState === 'connected' || 
+          peerConnection.iceConnectionState === 'completed') {
+        console.log(`ICE connection established for ${socketId}`);
       }
     };
 
@@ -43,41 +94,57 @@ const useWebRTC = (socket, roomId, localStream) => {
     }
 
     return peerConnection;
-  };
+  }, [localStream, socket]);
 
-  const createOffer = async (socketId, peerConnection) => {
+  const createOffer = useCallback(async (socketId, peerConnection) => {
     try {
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-      socket.emit('offer', {
-        offer,
-        to: socketId,
-        from: socket.id
+      console.log(`Creating offer for ${socketId}`);
+      const offer = await peerConnection.createOffer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
       });
+      await peerConnection.setLocalDescription(offer);
+      console.log(`Local description set for ${socketId}:`, offer);
+      
+      if (socket) {
+        socket.emit('offer', {
+          offer,
+          to: socketId,
+          from: socket.id
+        });
+        console.log(`Offer sent to ${socketId}`);
+      }
     } catch (error) {
       console.error('Error creating offer:', error);
     }
-  };
+  }, [socket]);
 
-  const createAnswer = async (socketId, offer) => {
+  const createAnswer = useCallback(async (socketId, offer) => {
     try {
+      console.log(`Creating answer for ${socketId}`);
       const peerConnection = peersRef.current.get(socketId) || createPeerConnection(socketId);
+      
+      console.log(`Setting remote description for ${socketId}:`, offer);
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
+      console.log(`Local description set for ${socketId}:`, answer);
       
-      socket.emit('answer', {
-        answer,
-        to: socketId,
-        from: socket.id
-      });
+      if (socket) {
+        socket.emit('answer', {
+          answer,
+          to: socketId,
+          from: socket.id
+        });
+        console.log(`Answer sent to ${socketId}`);
+      }
     } catch (error) {
       console.error('Error creating answer:', error);
     }
-  };
+  }, [createPeerConnection, socket]);
 
-  const handleAnswer = async (socketId, answer) => {
+  const handleAnswer = useCallback(async (socketId, answer) => {
     try {
       const peerConnection = peersRef.current.get(socketId);
       if (peerConnection) {
@@ -86,9 +153,9 @@ const useWebRTC = (socket, roomId, localStream) => {
     } catch (error) {
       console.error('Error handling answer:', error);
     }
-  };
+  }, []);
 
-  const handleIceCandidate = async (socketId, candidate) => {
+  const handleIceCandidate = useCallback(async (socketId, candidate) => {
     try {
       const peerConnection = peersRef.current.get(socketId);
       if (peerConnection) {
@@ -97,9 +164,9 @@ const useWebRTC = (socket, roomId, localStream) => {
     } catch (error) {
       console.error('Error handling ICE candidate:', error);
     }
-  };
+  }, []);
 
-  const removePeer = (socketId) => {
+  const removePeer = useCallback((socketId) => {
     const peerConnection = peersRef.current.get(socketId);
     if (peerConnection) {
       peerConnection.close();
@@ -110,7 +177,7 @@ const useWebRTC = (socket, roomId, localStream) => {
       newMap.delete(socketId);
       return newMap;
     });
-  };
+  }, []);
 
   useEffect(() => {
     if (!socket || !roomId) return;
@@ -119,53 +186,82 @@ const useWebRTC = (socket, roomId, localStream) => {
     socket.emit('request-users', { roomId });
 
     // Handle existing users
-    socket.on('existing-users', (users) => {
+    const handleExistingUsers = (users) => {
+      console.log('Received existing users:', users);
       users.forEach(({ socketId }) => {
+        console.log('Creating peer connection for existing user:', socketId);
         createPeerConnection(socketId, true);
       });
-    });
-
-    // Handle new user joining
-    socket.on('userJoined', (userData) => {
-      // This will be handled by the offer from the new user
-    });
+    };
 
     // Handle user leaving
-    socket.on('userLeft', (userData) => {
-      // Find the socket ID associated with this user and remove peer
-      // This is a simplified approach - in production you'd want better tracking
-      peersRef.current.forEach((_, socketId) => {
+    const handleUserLeft = () => {
+      console.log('User left, cleaning up connections');
+      // Clean up all peer connections when user leaves
+      // In a real app, you'd want to track which specific user left
+      const currentPeers = new Map(peersRef.current);
+      currentPeers.forEach((_, socketId) => {
         removePeer(socketId);
       });
-    });
+    };
 
     // Handle WebRTC signaling
-    socket.on('offer', ({ offer, from }) => {
+    const handleOffer = ({ offer, from }) => {
+      console.log('Received offer from:', from, 'Offer:', offer);
+      if (!offer || !from) {
+        console.error('Invalid offer received:', { offer, from });
+        return;
+      }
       createAnswer(from, offer);
-    });
+    };
 
-    socket.on('answer', ({ answer, from }) => {
+    const handleAnswerReceived = ({ answer, from }) => {
+      console.log('Received answer from:', from, 'Answer:', answer);
+      if (!answer || !from) {
+        console.error('Invalid answer received:', { answer, from });
+        return;
+      }
       handleAnswer(from, answer);
-    });
+    };
 
-    socket.on('ice-candidate', ({ candidate, from }) => {
+    const handleIceCandidateReceived = ({ candidate, from }) => {
+      console.log('Received ICE candidate from:', from, 'Candidate:', candidate);
+      if (!candidate || !from) {
+        console.error('Invalid ICE candidate received:', { candidate, from });
+        return;
+      }
       handleIceCandidate(from, candidate);
-    });
+    };
+
+    const handleWebRTCError = ({ error }) => {
+      console.error('WebRTC Error:', error);
+    };
+
+    // Set up event listeners
+    socket.on('existing-users', handleExistingUsers);
+    socket.on('userLeft', handleUserLeft);
+    socket.on('offer', handleOffer);
+    socket.on('answer', handleAnswerReceived);
+    socket.on('ice-candidate', handleIceCandidateReceived);
+    socket.on('webrtcError', handleWebRTCError);
 
     return () => {
-      socket.off('existing-users');
-      socket.off('offer');
-      socket.off('answer');
-      socket.off('ice-candidate');
+      socket.off('existing-users', handleExistingUsers);
+      socket.off('userLeft', handleUserLeft);
+      socket.off('offer', handleOffer);
+      socket.off('answer', handleAnswerReceived);
+      socket.off('ice-candidate', handleIceCandidateReceived);
+      socket.off('webrtcError', handleWebRTCError);
       
       // Close all peer connections
-      peersRef.current.forEach((peerConnection) => {
+      const currentPeers = peersRef.current;
+      currentPeers.forEach((peerConnection) => {
         peerConnection.close();
       });
       peersRef.current.clear();
       setRemoteStreams(new Map());
     };
-  }, [socket, roomId, localStream]);
+  }, [socket, roomId, createPeerConnection, createAnswer, handleAnswer, handleIceCandidate, removePeer]);
 
   // Update peer connections when local stream changes
   useEffect(() => {

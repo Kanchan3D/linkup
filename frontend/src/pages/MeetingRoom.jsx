@@ -269,12 +269,37 @@ const MeetingRoom = () => {
                 <video
                   autoPlay
                   playsInline
+                  muted // Important: mute remote videos to prevent feedback
+                  className="w-full h-64 object-cover"
                   ref={(video) => {
                     if (video && stream) {
+                      console.log(`Setting srcObject for ${socketId}:`, stream);
                       video.srcObject = stream;
+                      
+                      // Add event listeners for debugging
+                      video.onloadedmetadata = () => {
+                        console.log(`Video metadata loaded for ${socketId}:`, {
+                          videoWidth: video.videoWidth,
+                          videoHeight: video.videoHeight,
+                          tracks: stream.getTracks().map(t => ({
+                            kind: t.kind,
+                            enabled: t.enabled,
+                            readyState: t.readyState,
+                            label: t.label
+                          }))
+                        });
+                        video.play().catch(e => console.error('Video play error:', e));
+                      };
+                      
+                      video.onerror = (e) => {
+                        console.error(`Video error for ${socketId}:`, e);
+                      };
+                      
+                      video.onplay = () => {
+                        console.log(`Video playing for ${socketId}`);
+                      };
                     }
                   }}
-                  className="w-full h-64 object-cover"
                 />
                 <div className="absolute bottom-3 left-3 bg-black/50 px-2 py-1 rounded text-sm">
                   Participant {index + 1}

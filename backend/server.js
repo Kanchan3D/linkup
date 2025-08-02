@@ -40,8 +40,11 @@ const allowedOrigins = process.env.NODE_ENV === 'production'
       `http://${localIP}:5173`,
       "http://localhost:3000",
       `http://${localIP}:3000`,
-      /^http:\/\/192\.168\.\d+\.\d+:5173$/,
-      /^http:\/\/192\.168\.\d+\.\d+:3000$/
+      "http://localhost:8080", // Add backend URL for API calls
+      `http://${localIP}:8080`,
+      // Add explicit network IPs for better compatibility
+      "http://192.168.54.135:5173",
+      "http://192.168.54.135:3000"
     ];
 
 const app = express();
@@ -55,8 +58,22 @@ const io = socketIo(server, {
 });
 
 app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
+  origin: (origin, callback) => {
+    console.log('CORS request from origin:', origin);
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      console.error('CORS blocked origin:', origin);
+      return callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200 // For legacy browser support
 }));
 app.use(express.json({ limit: '10mb' })); // Increased limit for file uploads
 

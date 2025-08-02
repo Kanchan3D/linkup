@@ -10,6 +10,15 @@ router.post("/create", authMiddleware, async (req, res) => {
   try {
     const { roomId, name } = req.body;
     
+    // Input validation
+    if (!roomId || typeof roomId !== 'string' || roomId.trim().length === 0) {
+      return res.status(400).json({ message: "Valid roomId is required" });
+    }
+    
+    if (name && typeof name !== 'string') {
+      return res.status(400).json({ message: "Name must be a string" });
+    }
+    
     // Check if room already exists
     const existingRoom = await Room.findOne({ roomId });
     if (existingRoom) {
@@ -17,8 +26,8 @@ router.post("/create", authMiddleware, async (req, res) => {
     }
 
     const room = new Room({
-      roomId,
-      name: name || "Meeting Room",
+      roomId: roomId.trim(),
+      name: (name && name.trim()) || "Meeting Room",
       createdBy: req.user.id,
     });
 
@@ -176,12 +185,25 @@ router.post("/:roomId/messages", authMiddleware, async (req, res) => {
     const { roomId } = req.params;
     const { type, content } = req.body;
 
+    // Input validation
+    if (!roomId || typeof roomId !== 'string' || roomId.trim().length === 0) {
+      return res.status(400).json({ message: "Valid roomId is required" });
+    }
+    
+    if (!content || typeof content !== 'string' || content.trim().length === 0) {
+      return res.status(400).json({ message: "Message content is required" });
+    }
+    
+    if (content.length > 1000) {
+      return res.status(400).json({ message: "Message content too long (max 1000 characters)" });
+    }
+
     // Check if room exists
-    let room = await Room.findOne({ roomId, isActive: true });
+    let room = await Room.findOne({ roomId: roomId.trim(), isActive: true });
     if (!room) {
       // Auto-create room if it doesn't exist
       room = new Room({
-        roomId,
+        roomId: roomId.trim(),
         name: "Meeting Room",
         createdBy: req.user.id,
       });
@@ -189,11 +211,11 @@ router.post("/:roomId/messages", authMiddleware, async (req, res) => {
     }
 
     const message = new Message({
-      roomId,
+      roomId: roomId.trim(),
       senderId: req.user.id,
       senderName: req.user.name,
-      type,
-      content,
+      type: type || 'text',
+      content: content.trim(),
     });
 
     await message.save();

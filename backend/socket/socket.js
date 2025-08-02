@@ -1,4 +1,5 @@
 const rooms = new Map(); // Store room participants
+const Message = require("../models/Message");
 
 module.exports = (io) => {
   io.on("connection", (socket) => {
@@ -6,61 +7,148 @@ module.exports = (io) => {
 
     // Join a meeting room
     socket.on("joinRoom", ({ roomId, user }) => {
-      socket.join(roomId);
-      socket.roomId = roomId;
-      socket.user = user;
+      try {
+        if (!roomId || !user) {
+          console.error("Invalid joinRoom data:", { roomId, user });
+          return;
+        }
 
-      // Add user to room participants with socket ID
-      if (!rooms.has(roomId)) {
-        rooms.set(roomId, new Map());
+        // Ensure user has required fields
+        const userData = {
+          id: user.id || socket.id,
+          name: user.name || 'Anonymous User',
+          email: user.email || '',
+          ...user
+        };
+
+        socket.join(roomId);
+        socket.roomId = roomId;
+        socket.user = userData;
+
+        // Add user to room participants with socket ID
+        if (!rooms.has(roomId)) {
+          rooms.set(roomId, new Map());
+        }
+        rooms.get(roomId).set(socket.id, { ...userData, socketId: socket.id });
+
+        // Notify others about new participant
+        socket.to(roomId).emit("userJoined", { ...userData, socketId: socket.id });
+
+        // Send current participants list to the new user
+        const participants = Array.from(rooms.get(roomId).values()).filter(
+          (participant) => participant.id !== userData.id
+        );
+        socket.emit("participantsList", participants);
+
+        console.log(`${userData.name} (${socket.id}) joined room ${roomId}`);
+      } catch (error) {
+        console.error("Error in joinRoom:", error);
       }
-      rooms.get(roomId).set(socket.id, { ...user, socketId: socket.id });
-
-      // Notify others about new participant
-      socket.to(roomId).emit("userJoined", { ...user, socketId: socket.id });
-
-      // Send current participants list to the new user
-      const participants = Array.from(rooms.get(roomId).values()).filter(
-        (participant) => participant.id !== user.id
-      );
-      socket.emit("participantsList", participants);
-
-      console.log(`${user.name} (${socket.id}) joined room ${roomId}`);
     });
 
     // Leave a meeting room
     socket.on("leaveRoom", ({ roomId, user }) => {
-      socket.leave(roomId);
-      
-      if (rooms.has(roomId)) {
-        rooms.get(roomId).delete(socket.id);
-        if (rooms.get(roomId).size === 0) {
-          rooms.delete(roomId);
-        }
-      }
+      try {
+        const roomIdToLeave = roomId || socket.roomId;
+        const userToLeave = user || socket.user;
 
-      socket.to(roomId).emit("userLeft", { ...user, socketId: socket.id });
-      console.log(`${user.name} (${socket.id}) left room ${roomId}`);
+        if (!roomIdToLeave || !userToLeave) {
+          console.error("Invalid leaveRoom data:", { roomId: roomIdToLeave, user: userToLeave });
+          return;
+        }
+
+        socket.leave(roomIdToLeave);
+        
+        if (rooms.has(roomIdToLeave)) {
+          rooms.get(roomIdToLeave).delete(socket.id);
+          if (rooms.get(roomIdToLeave).size === 0) {
+            rooms.delete(roomIdToLeave);
+          }
+        }
+
+        socket.to(roomIdToLeave).emit("userLeft", { ...userToLeave, socketId: socket.id });
+        console.log(`${userToLeave.name || 'Unknown'} (${socket.id}) left room ${roomIdToLeave}`);
+      } catch (error) {
+        console.error("Error in leaveRoom:", error);
+      }
     });
 
     // Handle text messages
-    socket.on("sendMessage", (message) => {
-      // Broadcast message to all users in the room
-      io.to(message.roomId).emit("newMessage", {
-        ...message,
-        timestamp: new Date().toISOString(),
-      });
-      console.log(`Message sent in room ${message.roomId}: ${message.text}`);
+    socket.on("sendMessage", async (message) => {
+      try {
+        if (!message || !message.roomId || !message.text || !message.senderId) {
+          console.error("Invalid message data:", message);
+          return;
+        }
+
+        // Get sender name from socket user data or message data
+        const senderName = message.senderName || socket.user?.name || 'Anonymous';
+
+        // Save message to database
+        const newMessage = new Message({
+          roomId: message.roomId,
+          senderId: message.senderId,
+          senderName: senderName,
+          text: message.text,
+          type: message.type || 'text',
+          timestamp: new Date()
+        });
+
+        await newMessage.save();
+        console.log(`Message sent and saved in room ${message.roomId}: ${message.text}`);
+
+        // Broadcast message to all users in the room
+        io.to(message.roomId).emit("newMessage", {
+          ...message,
+          senderName: senderName,
+          _id: newMessage._id,
+          timestamp: newMessage.timestamp.toISOString(),
+        });
+      } catch (error) {
+        console.error("Error handling sendMessage:", error);
+      }
     });
 
     // Handle file sharing
-    socket.on("shareFile", (fileData) => {
-      // Broadcast file to all users in the room
-      io.to(fileData.roomId).emit("fileShared", {
-        ...fileData,
-        timestamp: new Date().toISOString(),
-      });
-      console.log(`File shared in room ${fileData.roomId}: ${fileData.fileName}`);
+    socket.on("shareFile", async (fileData) => {
+      try {
+        if (!fileData || !fileData.roomId || !fileData.fileName) {
+          console.error("Invalid file data:", fileData);
+          return;
+        }
+
+        // Get sender name from socket user data or file data
+        const senderName = fileData.senderName || socket.user?.name || 'Anonymous';
+
+        // Save file message to database
+        const fileMessage = new Message({
+          roomId: fileData.roomId,
+          senderId: fileData.senderId,
+          senderName: senderName,
+          type: 'file',
+          text: fileData.fileName,
+          fileData: {
+            fileName: fileData.fileName,
+            fileSize: fileData.fileSize,
+            fileType: fileData.fileType,
+            fileUrl: fileData.fileUrl
+          },
+          timestamp: new Date()
+        });
+
+        await fileMessage.save();
+        console.log(`File shared and saved in room ${fileData.roomId}: ${fileData.fileName}`);
+
+        // Broadcast file to all users in the room
+        io.to(fileData.roomId).emit("fileShared", {
+          ...fileData,
+          senderName: senderName,
+          _id: fileMessage._id,
+          timestamp: fileMessage.timestamp.toISOString(),
+        });
+      } catch (error) {
+        console.error("Error handling shareFile:", error);
+      }
     });
 
     // Handle typing indicators
@@ -70,19 +158,56 @@ module.exports = (io) => {
 
     // WebRTC Signaling Events
     socket.on("offer", ({ offer, to, from }) => {
-      socket.to(to).emit("offer", { offer, from });
+      if (!offer || !to || !from) {
+        console.error("Invalid offer data");
+        return;
+      }
+      console.log(`Forwarding offer from ${from} to ${to}`);
+      const targetSocket = io.sockets.sockets.get(to);
+      if (targetSocket) {
+        targetSocket.emit("offer", { offer, from });
+        console.log(`Offer sent to ${to}`);
+      } else {
+        console.error(`Target socket ${to} not found`);
+      }
     });
 
     socket.on("answer", ({ answer, to, from }) => {
-      socket.to(to).emit("answer", { answer, from });
+      if (!answer || !to || !from) {
+        console.error("Invalid answer data");
+        return;
+      }
+      console.log(`Forwarding answer from ${from} to ${to}`);
+      const targetSocket = io.sockets.sockets.get(to);
+      if (targetSocket) {
+        targetSocket.emit("answer", { answer, from });
+        console.log(`Answer sent to ${to}`);
+      } else {
+        console.error(`Target socket ${to} not found`);
+      }
     });
 
     socket.on("ice-candidate", ({ candidate, to, from }) => {
-      socket.to(to).emit("ice-candidate", { candidate, from });
+      if (!candidate || !to || !from) {
+        console.error("Invalid ice-candidate data");
+        return;
+      }
+      console.log(`Forwarding ICE candidate from ${from} to ${to}`);
+      const targetSocket = io.sockets.sockets.get(to);
+      if (targetSocket) {
+        targetSocket.emit("ice-candidate", { candidate, from });
+        console.log(`ICE candidate sent to ${to}`);
+      } else {
+        console.error(`Target socket ${to} not found`);
+      }
     });
 
     // Request existing users when joining
     socket.on("request-users", ({ roomId }) => {
+      if (!roomId) {
+        return;
+      }
+      
       const roomParticipants = rooms.get(roomId);
       if (roomParticipants) {
         const users = Array.from(roomParticipants.entries())
@@ -117,6 +242,7 @@ module.exports = (io) => {
             socket.to(socket.roomId).emit("userLeft", { ...socket.user, socketId: socket.id });
           }
         }
+        console.log(`${socket.user.name || 'Unknown'} (${socket.id}) disconnected from room ${socket.roomId}`);
       }
     });
   });
