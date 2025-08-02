@@ -18,6 +18,11 @@ const Dashboard = () => {
     navigate(`/meeting/${roomCode}`);
   };
 
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
   const copyRoomCode = (code) => {
     navigator.clipboard.writeText(code);
     // You could add a toast notification here
@@ -35,7 +40,7 @@ const Dashboard = () => {
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">Welcome, {user?.name}</span>
               <button
-                onClick={logout}
+                onClick={handleLogout}
                 className="text-gray-500 hover:text-gray-700 transition-colors"
               >
                 Sign out

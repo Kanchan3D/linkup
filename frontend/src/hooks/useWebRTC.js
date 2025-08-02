@@ -28,8 +28,9 @@ const useWebRTC = (socket, roomId, localStream) => {
     if (localStream) {
       console.log(`Adding local stream tracks for ${socketId}:`, localStream.getTracks().length, 'tracks');
       localStream.getTracks().forEach(track => {
-        console.log(`Adding track: ${track.kind} (${track.label})`);
-        peerConnection.addTrack(track, localStream);
+        console.log(`Adding track: ${track.kind} (${track.label}) enabled: ${track.enabled}`);
+        const sender = peerConnection.addTrack(track, localStream);
+        console.log(`Track added with sender:`, sender);
       });
     } else {
       console.warn(`No local stream available for ${socketId}`);
@@ -39,7 +40,14 @@ const useWebRTC = (socket, roomId, localStream) => {
     peerConnection.ontrack = (event) => {
       console.log(`Received remote stream from ${socketId}:`, event.streams.length, 'streams');
       const [remoteStream] = event.streams;
-      console.log(`Remote stream tracks:`, remoteStream.getTracks().map(t => `${t.kind} (${t.label})`));
+      console.log(`Remote stream tracks:`, remoteStream.getTracks().map(t => `${t.kind} (${t.label}) enabled: ${t.enabled}`));
+      
+      // Ensure audio tracks are enabled
+      remoteStream.getAudioTracks().forEach(track => {
+        track.enabled = true;
+        console.log(`Audio track from ${socketId}:`, { label: track.label, enabled: track.enabled, readyState: track.readyState });
+      });
+      
       setRemoteStreams(prev => new Map(prev.set(socketId, remoteStream)));
     };
 
@@ -104,7 +112,11 @@ const useWebRTC = (socket, roomId, localStream) => {
         offerToReceiveVideo: true
       });
       await peerConnection.setLocalDescription(offer);
-      console.log(`Local description set for ${socketId}:`, offer);
+      console.log(`Local description set for ${socketId}:`, {
+        type: offer.type,
+        hasAudio: offer.sdp.includes('m=audio'),
+        hasVideo: offer.sdp.includes('m=video')
+      });
       
       if (socket) {
         socket.emit('offer', {
@@ -124,12 +136,23 @@ const useWebRTC = (socket, roomId, localStream) => {
       console.log(`Creating answer for ${socketId}`);
       const peerConnection = peersRef.current.get(socketId) || createPeerConnection(socketId);
       
-      console.log(`Setting remote description for ${socketId}:`, offer);
+      console.log(`Setting remote description for ${socketId}:`, {
+        type: offer.type,
+        hasAudio: offer.sdp.includes('m=audio'),
+        hasVideo: offer.sdp.includes('m=video')
+      });
       await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
       
-      const answer = await peerConnection.createAnswer();
+      const answer = await peerConnection.createAnswer({
+        offerToReceiveAudio: true,
+        offerToReceiveVideo: true
+      });
       await peerConnection.setLocalDescription(answer);
-      console.log(`Local description set for ${socketId}:`, answer);
+      console.log(`Answer created for ${socketId}:`, {
+        type: answer.type,
+        hasAudio: answer.sdp.includes('m=audio'),
+        hasVideo: answer.sdp.includes('m=video')
+      });
       
       if (socket) {
         socket.emit('answer', {
@@ -189,9 +212,19 @@ const useWebRTC = (socket, roomId, localStream) => {
     const handleExistingUsers = (users) => {
       console.log('Received existing users:', users);
       users.forEach(({ socketId }) => {
-        console.log('Creating peer connection for existing user:', socketId);
-        createPeerConnection(socketId, true);
+        if (socketId && socketId !== socket.id) {
+          console.log('Creating peer connection for existing user:', socketId);
+          createPeerConnection(socketId, true);
+        }
       });
+    };
+
+    // Handle new user joining (you become the answerer)
+    const handleUserJoined = ({ socketId }) => {
+      if (socketId && socketId !== socket.id) {
+        console.log('New user joined, creating peer connection:', socketId);
+        createPeerConnection(socketId, false);
+      }
     };
 
     // Handle user leaving
@@ -239,6 +272,7 @@ const useWebRTC = (socket, roomId, localStream) => {
 
     // Set up event listeners
     socket.on('existing-users', handleExistingUsers);
+    socket.on('userJoined', handleUserJoined);
     socket.on('userLeft', handleUserLeft);
     socket.on('offer', handleOffer);
     socket.on('answer', handleAnswerReceived);
@@ -247,6 +281,7 @@ const useWebRTC = (socket, roomId, localStream) => {
 
     return () => {
       socket.off('existing-users', handleExistingUsers);
+      socket.off('userJoined', handleUserJoined);
       socket.off('userLeft', handleUserLeft);
       socket.off('offer', handleOffer);
       socket.off('answer', handleAnswerReceived);
@@ -266,16 +301,34 @@ const useWebRTC = (socket, roomId, localStream) => {
   // Update peer connections when local stream changes
   useEffect(() => {
     if (localStream) {
-      peersRef.current.forEach((peerConnection) => {
-        // Remove existing tracks
-        peerConnection.getSenders().forEach(sender => {
-          peerConnection.removeTrack(sender);
-        });
+      console.log('Local stream changed, updating peer connections');
+      console.log('Local stream tracks:', localStream.getTracks().map(t => `${t.kind} (enabled: ${t.enabled})`));
+      
+      peersRef.current.forEach((peerConnection, socketId) => {
+        // Get current senders
+        const senders = peerConnection.getSenders();
         
-        // Add new tracks
-        localStream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, localStream);
-        });
+        // Replace video track
+        const videoTrack = localStream.getVideoTracks()[0];
+        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+        if (videoSender && videoTrack) {
+          videoSender.replaceTrack(videoTrack).catch(e => {
+            console.error(`Error replacing video track for ${socketId}:`, e);
+          });
+        } else if (!videoSender && videoTrack) {
+          peerConnection.addTrack(videoTrack, localStream);
+        }
+        
+        // Replace audio track
+        const audioTrack = localStream.getAudioTracks()[0];
+        const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+        if (audioSender && audioTrack) {
+          audioSender.replaceTrack(audioTrack).catch(e => {
+            console.error(`Error replacing audio track for ${socketId}:`, e);
+          });
+        } else if (!audioSender && audioTrack) {
+          peerConnection.addTrack(audioTrack, localStream);
+        }
       });
     }
   }, [localStream]);

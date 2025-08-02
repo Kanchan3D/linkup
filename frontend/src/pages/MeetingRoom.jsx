@@ -28,11 +28,31 @@ const MeetingRoom = () => {
 
         // Always request both initially, we'll control them via track.enabled
         const constraints = {
-          video: true, // Always request video initially
-          audio: true  // Always request audio initially
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30, max: 60 }
+          },
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            sampleRate: 44100
+          }
         };
 
         const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        
+        console.log('Media stream obtained:', {
+          videoTracks: mediaStream.getVideoTracks().length,
+          audioTracks: mediaStream.getAudioTracks().length,
+          tracks: mediaStream.getTracks().map(t => ({
+            kind: t.kind,
+            label: t.label,
+            enabled: t.enabled,
+            readyState: t.readyState
+          }))
+        });
         
         // Set the initial enabled state for tracks
         const videoTrack = mediaStream.getVideoTracks()[0];
@@ -40,9 +60,11 @@ const MeetingRoom = () => {
         
         if (videoTrack) {
           videoTrack.enabled = isVideoEnabled;
+          console.log('Video track configured:', { enabled: videoTrack.enabled, label: videoTrack.label });
         }
         if (audioTrack) {
           audioTrack.enabled = isAudioEnabled;
+          console.log('Audio track configured:', { enabled: audioTrack.enabled, label: audioTrack.label });
         }
 
         if (userVideoRef.current) {
@@ -138,30 +160,28 @@ const MeetingRoom = () => {
   }, [socket, roomId, user]);
 
   const toggleVideo = () => {
+    const newVideoState = !isVideoEnabled;
+    setIsVideoEnabled(newVideoState);
+    
     if (stream) {
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
-        const newEnabled = !videoTrack.enabled;
-        videoTrack.enabled = newEnabled;
-        setIsVideoEnabled(newEnabled);
+        videoTrack.enabled = newVideoState;
+        console.log('Video toggled:', { enabled: newVideoState, track: videoTrack.label });
       }
-    } else {
-      // If no stream exists, just toggle the state
-      setIsVideoEnabled(!isVideoEnabled);
     }
   };
 
   const toggleAudio = () => {
+    const newAudioState = !isAudioEnabled;
+    setIsAudioEnabled(newAudioState);
+    
     if (stream) {
       const audioTrack = stream.getAudioTracks()[0];
       if (audioTrack) {
-        const newEnabled = !audioTrack.enabled;
-        audioTrack.enabled = newEnabled;
-        setIsAudioEnabled(newEnabled);
+        audioTrack.enabled = newAudioState;
+        console.log('Audio toggled:', { enabled: newAudioState, track: audioTrack.label });
       }
-    } else {
-      // If no stream exists, just toggle the state
-      setIsAudioEnabled(!isAudioEnabled);
     }
   };
 
@@ -269,18 +289,22 @@ const MeetingRoom = () => {
                 <video
                   autoPlay
                   playsInline
-                  muted // Important: mute remote videos to prevent feedback
                   className="w-full h-64 object-cover"
                   ref={(video) => {
                     if (video && stream) {
                       console.log(`Setting srcObject for ${socketId}:`, stream);
                       video.srcObject = stream;
                       
+                      // Ensure volume is set to maximum
+                      video.volume = 1.0;
+                      
                       // Add event listeners for debugging
                       video.onloadedmetadata = () => {
                         console.log(`Video metadata loaded for ${socketId}:`, {
                           videoWidth: video.videoWidth,
                           videoHeight: video.videoHeight,
+                          volume: video.volume,
+                          muted: video.muted,
                           tracks: stream.getTracks().map(t => ({
                             kind: t.kind,
                             enabled: t.enabled,
@@ -288,6 +312,16 @@ const MeetingRoom = () => {
                             label: t.label
                           }))
                         });
+                        
+                        // Check for audio tracks specifically
+                        const audioTracks = stream.getAudioTracks();
+                        console.log(`Audio tracks for ${socketId}:`, audioTracks.map(t => ({
+                          label: t.label,
+                          enabled: t.enabled,
+                          readyState: t.readyState,
+                          settings: t.getSettings ? t.getSettings() : 'not available'
+                        })));
+                        
                         video.play().catch(e => console.error('Video play error:', e));
                       };
                       
@@ -296,7 +330,7 @@ const MeetingRoom = () => {
                       };
                       
                       video.onplay = () => {
-                        console.log(`Video playing for ${socketId}`);
+                        console.log(`Video playing for ${socketId}, volume: ${video.volume}, muted: ${video.muted}`);
                       };
                     }
                   }}
